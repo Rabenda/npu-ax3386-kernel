@@ -1,7 +1,7 @@
 /*!
  *****************************************************************************
  *
- * @File       vha_plat_thead_light_fpga_c910.c
+ * @File       vha_plat_xuantie_th1520_fpga_c910.c
  * ---------------------------------------------------------------------------
  *
  * Copyright (C) 2020 Alibaba Group Holding Limited

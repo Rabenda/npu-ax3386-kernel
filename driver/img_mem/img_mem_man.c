@@ -651,7 +651,11 @@ static int _img_mem_get_user_pages(size_t size, uint64_t cpu_ptr,
 	ret = get_user_pages(
 			cpu_ptr, num_pages,
 			0,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+			tmp_pages);
+#else
 			tmp_pages, NULL);
+#endif
 #else
 	pr_err("%s get_user_pages not supported for this kernel version\n",
 					__func__);

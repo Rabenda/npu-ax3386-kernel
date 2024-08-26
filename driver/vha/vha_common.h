@@ -202,8 +202,7 @@ extern int debug_log_enable;
 	do {								\
         if(debug_log_enable)                \
 		   printk(KERN_DEBUG,dev_fmt(fmt), ##__VA_ARGS__); \
-
-    }while(0);\
+	}while(0);\
 })
 #endif
 
@@ -600,6 +599,9 @@ struct vha_dev {
 	uint32_t                   swd_timeout_m1;
 #endif
 	struct work_struct         worker;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)
+	struct workqueue_struct    *vha_workqueue;
+#endif
 	/* Indicates if driver should perform calibration during load phase */
 	bool                       do_calibration;
 	uint32_t                   calibration_cycles;

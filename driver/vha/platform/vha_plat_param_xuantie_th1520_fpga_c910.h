@@ -1,15 +1,15 @@
 /*!
  *****************************************************************************
  *
- * @File       vha_plat_param_thead_light_fpga_c910.h
+ * @File       vha_plat_param_xuantie_th1520_fpga_c910.h
  * ---------------------------------------------------------------------------
  *
  * Copyright (C) 2020 Alibaba Group Holding Limited
  *
  *****************************************************************************/
 
-#ifndef VHA_PLAT_PARAM_THEAD_LIGHT_FPGA_C910_H
-#define VHA_PLAT_PARAM_THEAD_LIGHT_FPGA_C910_H
+#ifndef VHA_PLAT_PARAM_XUANTIE_TH1520_FPGA_C910_H
+#define VHA_PLAT_PARAM_XUANTIE_TH1520_FPGA_C910_H
 
 /* Core clock frequency: default 30MHz */
 #define VHA_CORE_CLOCK_MHZ 1000
@@ -33,4 +33,4 @@
  * runtime suspend callback is called */
 #define VHA_CORE_SUSPEND_DELAY 10
 
-#endif /* VHA_PLAT_PARAM_THEAD_LIGHT_FPGA_C910_H */
+#endif /* VHA_PLAT_PARAM_XUANTIE_TH1520_FPGA_C910_H */

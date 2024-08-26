@@ -303,7 +303,13 @@ static void *unified_kmap_dmabuf(struct dma_buf *buf, unsigned long page)
 static int unified_map_km(struct heap *heap, struct buffer *buffer);
 static int unified_unmap_km(struct heap *heap, struct buffer *buffer);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
 static void *unified_vmap_dmabuf(struct dma_buf *buf)
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
+static int unified_vmap_dmabuf(struct dma_buf *buf, struct dma_buf_map *map)
+#else
+static int unified_vmap_dmabuf(struct dma_buf *buf, struct iosys_map *map)
+#endif
 {
 	struct buffer *buffer = buf->priv;
 	struct heap *heap;
@@ -319,9 +325,18 @@ static void *unified_vmap_dmabuf(struct dma_buf *buf)
 	pr_debug("%s:%d buffer %d kptr 0x%p\n", __func__, __LINE__,
 		buffer->id, buffer->kptr);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
 	return buffer->kptr;
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
+	dma_buf_map_set_vaddr(map, buffer->kptr);
+	return (buffer->kptr == NULL) ? -ENOMEM : 0;
+#else
+	iosys_map_set_vaddr(map, buffer->kptr);
+    return (buffer->kptr == NULL) ? -ENOMEM : 0;
+#endif
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
 static void unified_vunmap_dmabuf(struct dma_buf *buf, void *kptr)
 {
 	struct buffer *buffer = buf->priv;
@@ -338,6 +353,43 @@ static void unified_vunmap_dmabuf(struct dma_buf *buf, void *kptr)
 	if (buffer->kptr == kptr)
 		unified_unmap_km(heap, buffer);
 }
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
+static void unified_vunmap_dmabuf(struct dma_buf *buf, struct dma_buf_map *map)
+{
+	struct buffer *buffer = buf->priv;
+	struct heap *heap;
+
+	if (!buffer)
+		return;
+
+	heap = buffer->heap;
+
+	pr_debug("%s:%d buffer %d kptr 0x%p (0x%p)\n", __func__, __LINE__,
+		buffer->id, buffer->kptr, map->vaddr);
+
+	if(buffer->kptr == map->vaddr)
+		unified_unmap_km(heap, buffer);
+	dma_buf_map_clear(map);
+}
+#else
+static void unified_vunmap_dmabuf(struct dma_buf *buf, struct iosys_map *map)
+{
+	struct buffer *buffer = buf->priv;
+	struct heap *heap;
+
+	if (!buffer)
+		return;
+
+	heap = buffer->heap;
+
+	pr_debug("%s:%d buffer %d kptr 0x%p (0x%p)\n", __func__, __LINE__,
+		buffer->id, buffer->kptr, map->vaddr);
+
+	if(buffer->kptr == map->vaddr)
+		unified_unmap_km(heap, buffer);
+	iosys_map_clear(map);
+}
+#endif
 
 static const struct dma_buf_ops unified_dmabuf_ops = {
 	.map_dma_buf = unified_map_dmabuf,
@@ -819,8 +871,14 @@ static int unified_map_um(struct heap *heap, struct buffer *buffer,
 		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
 	vma->vm_ops = &unified_mmap_vm_ops;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
 	vma->vm_flags &= ~VM_PFNMAP;
 	vma->vm_flags |= VM_MIXEDMAP;
+#else
+	vm_flags_clear(vma, VM_PFNMAP);
+    vm_flags_set(vma, VM_MIXEDMAP);
+#endif
 	vma->vm_private_data = buffer;
 	vma->vm_pgoff = 0;
 

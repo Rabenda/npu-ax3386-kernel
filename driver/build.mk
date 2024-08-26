@@ -20,7 +20,7 @@ export CONFIG_VHA := m
 
 # hardware options:
 # CONFIG_VHA_DUMMY:                 driver runs without hardware
-# CONFIG_VHA_THEAD_LIGHT_FPGA_C910: driver runs with T-Head Light-FPGA hw platform using a device tree
+# CONFIG_VHA_XUANTIE_TH1520_FPGA_C910: driver runs with XuanTie Th1520-FPGA hw platform using a device tree
 
 # system configuration options
 # CONFIG_VHA_SYS_MIRAGE:   driver runs with Mirage system configuration file. It is set by default when CONFIG_HW_AX2 is set.
@@ -31,20 +31,20 @@ subdir-ccflags-y += -Wall -g
 EXTRA_CFLAGS :=
 
 # fail if target not specified
-ifeq ($(CONFIG_VHA_THEAD_LIGHT_FPGA_C910),y)
-  EXTRA_CFLAGS += -DCONFIG_VHA_THEAD_LIGHT_FPGA_C910
-  export CONFIG_NAME=CONFIG_VHA_THEAD_LIGHT_FPGA_C910
+ifeq ($(CONFIG_VHA_XUANTIE_TH1520_FPGA_C910),y)
+  EXTRA_CFLAGS += -DCONFIG_VHA_XUANTIE_TH1520_FPGA_C910
+  export CONFIG_NAME=CONFIG_VHA_XUANTIE_TH1520_FPGA_C910
   export CONFIG_HW_AX3 := y
-else ifeq ($(CONFIG_VHA_THEAD_LIGHT),y)
-  EXTRA_CFLAGS += -DCONFIG_VHA_THEAD_LIGHT
-  export CONFIG_NAME=CONFIG_VHA_THEAD_LIGHT
+else ifeq ($(CONFIG_VHA_XUANTIE_TH1520),y)
+  EXTRA_CFLAGS += -DCONFIG_VHA_XUANTIE_TH1520
+  export CONFIG_NAME=CONFIG_VHA_XUANTIE_TH1520
   export CONFIG_HW_AX3 := y
   export CONFIG_VHA_LO_PRI_SUBSEGS := y
 else ifeq ($(CONFIG_VHA_DUMMY),y)
   export CONFIG_NAME=CONFIG_VHA_DUMMY
   export CONFIG_HW_AX3 := y
 else
-  $(error no VHA platform specified. Try CONFIG_VHA_DUMMY=y or CONFIG_VHA_THEAD_XXX=y etc)
+  $(error no VHA platform specified. Try CONFIG_VHA_DUMMY=y or CONFIG_VHA_XUANTIE_XXX=y etc)
 endif
 
 #------------------------------------

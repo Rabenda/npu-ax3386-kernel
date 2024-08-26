@@ -33,8 +33,8 @@ vha-$(CONFIG_VHA_ORION)        += $(PLAT)/vha_plat_orion.o
 vha-$(CONFIG_VHA_NEXEF)        += $(PLAT)/vha_plat_nexef.o
 vha-$(CONFIG_VHA_DT_EXAMPLE)   += $(PLAT)/vha_plat_dt_example.o $(PLAT)/vha_plat_dt.o
 
-vha-$(CONFIG_VHA_THEAD_LIGHT_FPGA_C910)   += $(PLAT)/vha_plat_thead.o $(PLAT)/vha_plat_thead_light_fpga_c910.o
-vha-$(CONFIG_VHA_THEAD_LIGHT)   += $(PLAT)/vha_plat_thead.o $(PLAT)/vha_plat_thead_light.o
+vha-$(CONFIG_VHA_XUANTIE_TH1520_FPGA_C910)   += $(PLAT)/vha_plat_xuantie.o $(PLAT)/vha_plat_xuantie_th1520_fpga_c910.o
+vha-$(CONFIG_VHA_XUANTIE_TH1520)   += $(PLAT)/vha_plat_xuantie.o $(PLAT)/vha_plat_xuantie_th1520.o
 
 # System configuration
 # For AX2 set Mirage by default

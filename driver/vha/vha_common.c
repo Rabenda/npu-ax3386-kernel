@@ -991,7 +991,11 @@ void vha_rm_session(struct vha_session *session)
 	/* Used for simulating system level suspend/resume functionality */
 	if (list_empty(&vha->sessions) && vha->suspend_interval_msec) {
 		mutex_unlock(&vha->lock);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
 		flush_scheduled_work();
+#else
+		flush_workqueue(vha->vha_workqueue);
+#endif
 		cancel_delayed_work_sync(&vha->suspend_dwork);
 		mutex_lock(&vha->lock);
 	}
@@ -1151,6 +1155,24 @@ static void vha_apm_worker(struct work_struct *work)
 	mutex_unlock(&vha->lock);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)
+#define VHA_MAX_NODE_NAME 16
+static int vha_workqueue_alloc(struct vha_dev *vha, unsigned int id)
+{
+	char wq_name[VHA_MAX_NODE_NAME] = { 0 };
+
+	snprintf(wq_name, sizeof(wq_name)-1, "vha%d", vha->id);
+
+	vha->vha_workqueue = alloc_workqueue(wq_name, 0, 0);
+	if (IS_ERR_OR_NULL(vha->vha_workqueue)) {
+		vha->vha_workqueue = NULL;
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+#endif
+
 int vha_add_dev(struct device *dev,
 		const struct heap_config heap_configs[], const int heaps,
 		void *plat_data, void __iomem *reg_base, uint32_t reg_size)
@@ -1253,6 +1275,14 @@ int vha_add_dev(struct device *dev,
 
 	/* Initialise command data pump worker */
 	INIT_WORK(&vha->worker, cmd_worker);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)
+	ret = vha_workqueue_alloc(vha, drv.num_devs);
+	if (ret) {
+		dev_err(dev, "%s: vha_workqueue alloc failed!", __func__);
+		goto out_alloc_workqueue;
+	}
+#endif
 
 #ifdef CONFIG_VHA_DUMMY_SIMULATE_HW_PROCESSING_TIME
 	/* Initialise hw processing time simulation worker */
@@ -1358,6 +1388,10 @@ out_alloc_common:
 	vha_dbg_deinit(vha);
 out_add_dev:
 	dev_set_drvdata(dev, NULL);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)
+	destroy_workqueue(vha->vha_workqueue);
+out_alloc_workqueue:
+#endif
 	vha_deinit();
 out_free_dev:
 	devm_kfree(dev, vha);
@@ -1395,7 +1429,11 @@ void vha_rm_dev(struct device *dev)
 		return;
 	}
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
 	flush_scheduled_work();
+#else
+	flush_workqueue(vha->vha_workqueue);
+#endif
 
 	for (id = 0; id < vha->hw_props.num_cnn_core_devs; id++)
 		cancel_delayed_work_sync(&vha->apm_dworks[id].dwork);
@@ -1452,6 +1490,10 @@ void vha_rm_dev(struct device *dev)
 	vha_dbg_deinit(vha);
 	vha_pdump_deinit(&vha_common->pdump);
 	dev_set_drvdata(dev, NULL);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)
+	destroy_workqueue(vha->vha_workqueue);
+#endif
 
 	devm_kfree(dev, vha);
 	devm_kfree(dev, vha_common);
@@ -1961,7 +2003,11 @@ void vha_chk_cmd_queues(struct vha_dev *vha, bool threaded)
 		 * so it is not necessary to do any kind of rescheduling,
 		 * as it will be executed anyway!
 		 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
 		schedule_work(&vha->worker);  /* call asynchronously */
+#else
+		queue_work(vha->vha_workqueue, &vha->worker);  /* call asynchronously */
+#endif
 	} else {
 		/* Direct calls must be always invoked
 		 * with vha_dev.lock == locked

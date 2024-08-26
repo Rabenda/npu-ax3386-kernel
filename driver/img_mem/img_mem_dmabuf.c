@@ -59,6 +59,8 @@
 #include <img_mem_man.h>
 #include "img_mem_man_priv.h"
 
+MODULE_IMPORT_NS(DMA_BUF);
+
 /* this condition is actually true for kernels < 4.4.100 */
 #ifndef PHYS_PFN
 #define PHYS_PFN(x)	((unsigned long)((x) >> PAGE_SHIFT))
@@ -66,6 +68,12 @@
 
 static int trace_physical_pages;
 static int trace_mmap_fault;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0)
+static struct iosys_map dma_map;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+static struct dma_buf_map dma_map;
+#endif
+
 
 struct buffer_data {
 	struct dma_buf *dma_buf;
@@ -146,7 +154,11 @@ static void dmabuf_heap_free(struct heap *heap, struct buffer *buffer)
 	pr_debug("%s:%d buffer %d (0x%p)\n", __func__, __LINE__,
 		buffer->id, buffer);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+	if(dma_map.vaddr) {
+#else
 	if (buffer->kptr) {
+#endif
 		struct dma_buf *dma_buf = data->dma_buf;
 
 		dma_buf_end_cpu_access(dma_buf,
@@ -156,8 +168,12 @@ static void dmabuf_heap_free(struct heap *heap, struct buffer *buffer)
 #endif
 						DMA_BIDIRECTIONAL);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+		dma_buf_vunmap(dma_buf, &dma_map);
+#else
 		dma_buf_vunmap(dma_buf, buffer->kptr);
 		buffer->kptr = NULL;
+#endif
 	}
 
 	if (data->mapped_vma)
@@ -337,8 +353,15 @@ static int dmabuf_heap_map_um(struct heap *heap, struct buffer *buffer,
 	/*vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);*/
 
 	vma->vm_ops = &dmabuf_heap_mmap_vm_ops;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
 	vma->vm_flags &= ~VM_PFNMAP;
 	vma->vm_flags |= VM_MIXEDMAP;
+#else
+	vm_flags_clear(vma, VM_PFNMAP);
+    vm_flags_set(vma, VM_MIXEDMAP);
+#endif
+
 	vma->vm_private_data = buffer;
 	vma->vm_pgoff = 0;
 
@@ -356,7 +379,11 @@ static int dmabuf_heap_map_km(struct heap *heap, struct buffer *buffer)
 	pr_debug("%s:%d buffer %d (0x%p)\n", __func__, __LINE__,
 		buffer->id, buffer);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+	if (dma_map.vaddr) {
+#else
 	if (buffer->kptr) {
+#endif
 		pr_warn("%s called for already mapped buffer %d\n",
 			__func__, buffer->id);
 		return 0;
@@ -373,6 +400,16 @@ static int dmabuf_heap_map_km(struct heap *heap, struct buffer *buffer)
 		return ret;
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+	ret = dma_buf_vmap(dma_buf, &dma_map);
+	if (ret) {
+		pr_err("%s dma_buf_vmap failed!\n", __func__);
+		return ret;
+	}
+
+	pr_debug("%s:%d buffer %d vmap to 0x%p\n", __func__, __LINE__,
+		buffer->id, dma_map.vaddr);
+#else
 	buffer->kptr = dma_buf_vmap(dma_buf);
 	if (!buffer->kptr) {
 		pr_err("%s dma_buf_vmap failed!\n", __func__);
@@ -381,6 +418,7 @@ static int dmabuf_heap_map_km(struct heap *heap, struct buffer *buffer)
 
 	pr_debug("%s:%d buffer %d vmap to 0x%p\n", __func__, __LINE__,
 		buffer->id, buffer->kptr);
+#endif
 	return 0;
 }
 
@@ -392,7 +430,11 @@ static int dmabuf_heap_unmap_km(struct heap *heap, struct buffer *buffer)
 	pr_debug("%s:%d buffer %d (0x%p)\n", __func__, __LINE__,
 		buffer->id, buffer);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+	if (!dma_map.vaddr) {
+#else
 	if (!buffer->kptr) {
+#endif
 		pr_warn("%s called for unmapped buffer %d\n",
 			__func__, buffer->id);
 		return 0;
@@ -405,11 +447,18 @@ static int dmabuf_heap_unmap_km(struct heap *heap, struct buffer *buffer)
 #endif
 					DMA_BIDIRECTIONAL);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+	dma_buf_vunmap(dma_buf, &dma_map);
+
+	pr_debug("%s:%d buffer %d kunmap from 0x%p\n", __func__, __LINE__,
+		buffer->id, dma_map.vaddr);
+#else
 	dma_buf_vunmap(dma_buf, buffer->kptr);
 
 	pr_debug("%s:%d buffer %d kunmap from 0x%p\n", __func__, __LINE__,
 		buffer->id, buffer->kptr);
 	buffer->kptr = NULL;
+#endif
 
 	return 0;
 }

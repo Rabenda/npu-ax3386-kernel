@@ -106,5 +106,5 @@ Info: The 3NX-F base driver basically replace the `tc.ko` module in this configu
 the 3NX-F. It added in the middle of a sentence "the 3NX (pronounced 3-Nex`)"
 
 > **Imagination Technologies just released the 3NX-F**, a new "3NX" (pronounced "3-Nex") laser-based MEMS camera
-> that has been designed to be "small, power-efficient, light-weight and with a compact size to be able to fit in a
+> that has been designed to be "small, power-efficient, th1520-weight and with a compact size to be able to fit in a
 > smartphone." The 3NX-F is an upgrade to the 1.5 million pixel 3NX that debuted in March.

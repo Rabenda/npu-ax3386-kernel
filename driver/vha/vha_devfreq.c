@@ -20,7 +20,14 @@
 #include <linux/mutex.h>
 #include <linux/delay.h>
 #include "vha_common.h"
+#ifdef CONFIG_PM_DEVFREQ
 #include <../drivers/devfreq/governor.h>
+#endif
+
+#ifdef CONFIG_TH1520_SYSTEM_MONITOR
+#include <soc/xuantie/th1520_system_monitor.h>
+#include <dt-bindings/soc/th1520_system_status.h>
+#endif
 
 #ifdef CONFIG_DEVFREQ_THERMAL
 #include <linux/devfreq_cooling.h>
@@ -30,7 +37,7 @@
 #define VHA_DEVFREQ_GOVERNOR_NAME "vha_ondemand"
 #define DFSO_UPTHRESHOLD	(90)
 #define DFSO_DOWNDIFFERENCTIAL	(5)
-#define LIGHT_NPUFREQ_PCLKNUM	3
+#define TH1520_NPUFREQ_PCLKNUM	3
 
 struct governor_vhaondemand_date {
 	unsigned int upthreshold;
@@ -46,7 +53,7 @@ struct vhadevfreq_load_data {
 struct vha_devfreq_device {
     struct devfreq *devfreq;
 	struct device *dev;
-    struct regulator *vdd;
+    struct opp_table *opp_table;
 
     struct governor_vhaondemand_date vhademand_date;
     struct vhadevfreq_load_data vha_load_data;
@@ -57,9 +64,13 @@ struct vha_devfreq_device {
 #ifdef CONFIG_DEVFREQ_THERMAL
 	struct thermal_cooling_device *devfreq_cooling;
 #endif
+
+#ifdef CONFIG_TH1520_SYSTEM_MONITOR
+    struct monitor_dev_info *mdev_info;
+#endif
 };
 
-enum LIGHT_NPUFREQ_PARENT_CLKS {
+enum TH1520_NPUFREQ_PARENT_CLKS {
     NPU_CCLK,
 	GMAC_PLL_FOUTPOSTDIV,
 	NPU_CCLK_OUT_DIV,
@@ -72,6 +83,7 @@ static struct clk_bulk_data clks[] = {
 	{ .id = "npu_cclk_out_div" },
 };
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 0, 0)
 static int vha_devfreq_opp_helper(struct dev_pm_set_opp_data *data)
 {
     struct device *dev = data->dev;
@@ -121,6 +133,52 @@ check_clk:
 
     return ret;
 }
+#else
+static int vha_devfreq_opp_helper(struct device *dev, struct opp_table *opp_table,
+			struct dev_pm_opp *opp, void *data, bool scaling_down)
+{
+    struct clk *clk_vha = clks[NPU_CCLK].clk;
+    unsigned long freq = *(unsigned long *)data;
+    unsigned long curr_freq;
+    int ret = 0;
+
+    ret = strcmp(__clk_get_name(clk_get_parent(clk_vha)),
+	            __clk_get_name(clks[NPU_CCLK_OUT_DIV].clk));
+
+    if (!ret && freq < clk_get_rate(clks[GMAC_PLL_FOUTPOSTDIV].clk))
+    {
+        clk_set_parent(clk_vha, clks[GMAC_PLL_FOUTPOSTDIV].clk);
+
+        ret = clk_set_rate(clks[NPU_CCLK_OUT_DIV].clk, freq);
+        if (ret) {
+            dev_err(dev, "%s: Failed to set NPU_CCLK_OUT_DIV freq: %d.\n",
+                __func__, ret);
+            ret = -EINVAL;
+        }
+        udelay(1);
+
+        clk_set_parent(clk_vha, clks[NPU_CCLK_OUT_DIV].clk);
+
+        goto check_clk;
+    }
+
+    ret = clk_set_rate(clk_vha, freq);
+    if (ret) {
+        dev_err(dev, "%s: Failed to set freq: %d.\n", __func__, ret);
+        ret = -EINVAL;
+    }
+
+check_clk:
+    curr_freq = clk_get_rate(clk_vha);
+    if (curr_freq != freq) {
+        dev_err(dev, "Get wrong frequency, Request %lu, Current %lu.\n",
+			freq, curr_freq);
+		ret = -EINVAL;
+    }
+
+    return ret;
+}
+#endif
 
 static int vhafreq_target(struct device *dev, unsigned long *freq,
                      u32 flags)
@@ -214,6 +272,7 @@ static struct devfreq_dev_profile devfreq_vha_profile = {
 	.get_cur_freq	= vhafreq_get_cur_freq,
 };
 
+#ifdef CONFIG_PM_DEVFREQ
 static int devfreq_vha_ondemand_func(struct devfreq *df, unsigned long *freq)
 {
     int err;
@@ -335,17 +394,62 @@ static struct devfreq_governor devfreq_vha_ondemand = {
 	.get_target_freq = devfreq_vha_ondemand_func,
 	.event_handler = devfreq_vha_ondemand_handler,
 };
+#endif
 
 #ifdef CONFIG_DEVFREQ_THERMAL
 static struct devfreq_cooling_power vha_cooling_power = {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
 	.get_static_power = NULL,
     .dyn_power_coeff = 1000,
+#endif
+};
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+static int opp_config_id = 0;
+struct dev_pm_opp_config vha_dev_config = {
+    .config_clks = vha_devfreq_opp_helper,
+};
+#endif
+
+#ifdef CONFIG_TH1520_SYSTEM_MONITOR
+static int vha_qos_rate_adjust(struct monitor_dev_info *info, unsigned long status)
+{
+    int ret = 0;
+
+    if (status & (SYS_STATUS_DSP | SYS_STATUS_PERFORMANCE))
+        ret = th1520_monitor_dev_rate_adjust(info, FREQ_QOS_MAX_DEFAULT_VALUE);
+    else
+        ret = th1520_monitor_dev_rate_adjust(info, FREQ_QOS_MIN_DEFAULT_VALUE);
+
+    return ret;
+}
+
+static struct monitor_dev_profile npu_dev_monitor = {
+	.type = MONITOR_TPYE_DEV,
+	.qos_rate_adjust = vha_qos_rate_adjust,
 };
 #endif
 
 static int vha_devfreq_opp_init(struct device *dev)
 {
     struct opp_table *opp_table = NULL, *reg_opp_table = NULL, *clk_opp_table = NULL;
+    struct vha_devfreq_device *vhafreq_dev = vha_devfreq_get_drvdata(dev);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+    const char * const reg_names[] = {"soc_dvdd08_ap", NULL};
+    const char *clk_names[] = { "cclk", NULL };
+    int ret;
+
+    vha_dev_config.regulator_names = reg_names;
+    vha_dev_config.clk_names = clk_names;
+
+    opp_config_id = dev_pm_opp_set_config(dev, &vha_dev_config);
+    if (opp_config_id < 0) {
+        dev_err(dev, "Failed to set opp_config.\n");
+        ret = opp_config_id;
+        return ret;
+    }
+#else
     const char * const reg_names[] = {"soc_dvdd08_ap"};
     int ret;
 
@@ -369,6 +473,9 @@ static int vha_devfreq_opp_init(struct device *dev)
         goto reg_opp_table_put;
 	}
 
+    vhafreq_dev->opp_table = opp_table;
+#endif
+
     ret = dev_pm_opp_of_add_table(dev);
     if(ret){
 		dev_err(dev, "Failed to add vha opp table.\n");
@@ -377,6 +484,10 @@ static int vha_devfreq_opp_init(struct device *dev)
 
     return 0;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+opp_helper_unregist:
+    dev_pm_opp_clear_config(opp_config_id);
+#else
 opp_helper_unregist:
     if(opp_table)
         dev_pm_opp_unregister_set_opp_helper(opp_table);
@@ -386,6 +497,7 @@ reg_opp_table_put:
 clk_opp_table_put:
     if(clk_opp_table)
         dev_pm_opp_put_clkname(clk_opp_table);
+#endif
     return ret;
 }
 
@@ -403,13 +515,15 @@ int vha_devfreq_init(struct device *dev)
     mutex_init(&devfreq_vhadev->lock);
     vha_dev_add_devfreq(dev, devfreq_vhadev);
 
+#ifdef CONFIG_PM_DEVFREQ
 	ret = devfreq_add_governor(&devfreq_vha_ondemand);
 	if (ret) {
 		dev_err(dev, "%s: Failed to add vha_ondemand governor.\n", __func__);
 		goto free_freqdev_dev;
 	}
+#endif
 
-    num_clks = LIGHT_NPUFREQ_PCLKNUM;
+    num_clks = TH1520_NPUFREQ_PCLKNUM;
 	ret = clk_bulk_get(dev, num_clks, clks);
 	if (ret) {
         dev_err(dev, "%s: Failed to register clk_bulk_get.\n", __func__);
@@ -418,18 +532,10 @@ int vha_devfreq_init(struct device *dev)
 
     dp->initial_freq = clk_get_rate(clks[NPU_CCLK].clk);
 
-    devfreq_vhadev->vdd = devm_regulator_get(dev, "soc_dvdd08_ap");
-    if (IS_ERR_OR_NULL(devfreq_vhadev->vdd)) {
-		dev_err(dev, "%s: Failed to devm_regulator_get\n", __func__);
-		ret = PTR_ERR(devfreq_vhadev->vdd);
-        devfreq_vhadev->vdd = NULL;
-		goto vha_clks_put;
-	}
-
     ret = vha_devfreq_opp_init(dev);
     if (ret) {
         dev_err(dev, "%s: Failed to vha_devfreq_opp_init.\n", __func__);
-        goto vha_regulator_put;
+        goto vha_clks_put;
     }
 
     devfreq_vhadev->devfreq = devm_devfreq_add_device(dev, dp,
@@ -448,10 +554,11 @@ int vha_devfreq_init(struct device *dev)
 	}
 
 #ifdef CONFIG_DEVFREQ_THERMAL
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
     if (of_property_read_u32(dev->of_node, "dynamic-power-coefficient",
 					(u32 *)&vha_cooling_power.dyn_power_coeff))
         dev_err(dev, "%s: Failed to read dynamic power coefficient property.\n", __func__);
-
+#endif
     devfreq_vhadev->devfreq_cooling = of_devfreq_cooling_register_power(
 		dev->of_node, devfreq_vhadev->devfreq, &vha_cooling_power);
 	if (IS_ERR_OR_NULL(devfreq_vhadev->devfreq_cooling)){
@@ -460,6 +567,12 @@ int vha_devfreq_init(struct device *dev)
     }
 #endif
 
+#ifdef CONFIG_TH1520_SYSTEM_MONITOR
+    npu_dev_monitor.data = devfreq_vhadev->devfreq;
+    devfreq_vhadev->mdev_info = th1520_system_monitor_register(dev, &npu_dev_monitor);
+	if (IS_ERR(devfreq_vhadev->mdev_info))
+		devfreq_vhadev->mdev_info = NULL;
+#endif
     dev_info(dev, "%s: Success to register the NPU to DevFreq.\n", __func__);
 
     return 0;
@@ -472,8 +585,6 @@ opp_notifier_failed:
     devm_devfreq_remove_device(dev, devfreq_vhadev->devfreq);
 free_opp_table:
     dev_pm_opp_of_remove_table(dev);
-vha_regulator_put:
-    devm_regulator_put(devfreq_vhadev->vdd);
 vha_clks_put:
     clk_bulk_put(num_clks, clks);
 free_freqdev_dev:
@@ -486,6 +597,11 @@ void vha_devfreq_term(struct device *dev)
     struct vha_devfreq_device *devfreq_vhadev = vha_devfreq_get_drvdata(dev);
 
     if (devfreq_vhadev){
+#ifdef CONFIG_TH1520_SYSTEM_MONITOR
+        if(devfreq_vhadev->mdev_info)
+            th1520_system_monitor_unregister(devfreq_vhadev->mdev_info);
+#endif
+
 #ifdef CONFIG_DEVFREQ_THERMAL
         if (devfreq_vhadev->devfreq_cooling){
             devfreq_cooling_unregister(devfreq_vhadev->devfreq_cooling);
@@ -498,11 +614,19 @@ void vha_devfreq_term(struct device *dev)
 
             dev_pm_opp_of_remove_table(devfreq_vhadev->dev);
 
+#ifdef CONFIG_PM_DEVFREQ
             devfreq_remove_governor(&devfreq_vha_ondemand);
+#endif
 	    }
 
-        if (devfreq_vhadev->vdd)
-            devm_regulator_put(devfreq_vhadev->vdd);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+            dev_pm_opp_clear_config(opp_config_id);
+#else
+        if (devfreq_vhadev->opp_table) {
+            dev_pm_opp_put_clkname(devfreq_vhadev->opp_table);
+            dev_pm_opp_unregister_set_opp_helper(devfreq_vhadev->opp_table);
+        }
+#endif
 
         clk_bulk_put(num_clks, clks);
 

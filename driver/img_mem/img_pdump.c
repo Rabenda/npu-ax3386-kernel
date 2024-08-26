@@ -45,10 +45,15 @@
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
-#include <stdarg.h>
 
 #include <img_mem_man.h>
 #include <vha_drv_common.h>
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
+#include <stdarg.h>
+#else
+#include <linux/stdarg.h>
+#endif
 
 /*
  * create a pdump buffer

@@ -6,7 +6,7 @@ Build a buildroot of SoC project
 Build kernel module:
 cd driver
 Modify PATH_TO_BUILDROOT in driver/build.mk
-make -f build.mk CONFIG_VHA_THEAD_LIGHT=y
+make -f build.mk CONFIG_VHA_XUANTIE_TH1520=y
 Description of each directories
 
 driver/: Linux kernel module Driver.
